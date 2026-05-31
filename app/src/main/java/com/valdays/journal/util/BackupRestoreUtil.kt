@@ -2,18 +2,36 @@ package com.valdays.journal.util
 
 import android.content.Context
 import android.net.Uri
+import com.google.gson.Gson
+import com.valdays.journal.data.local.entity.MediaEntity
+import com.valdays.journal.data.local.entity.NoteEntity
 import java.io.*
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
+data class NoteBackupDTO(
+    val note: NoteEntity,
+    val media: List<MediaEntity>
+)
+
 object BackupRestoreUtil {
+
+    private val gson = Gson()
 
     /**
      * Exports a note and its associated media to a .vldys (zip) archive.
      */
-    fun exportToVldys(context: Context, noteJsonString: String, mediaUris: List<Uri>, outputStream: OutputStream) {
+    fun exportToVldys(context: Context, note: NoteEntity, media: List<MediaEntity>, outputStream: OutputStream) {
         ZipOutputStream(BufferedOutputStream(outputStream)).use { zos ->
+            // Update media entities to point to relative zip names in DTO
+            val zipMediaList = media.mapIndexed { index, m ->
+                m.copy(uriString = "media_$index.file")
+            }
+
+            val dto = NoteBackupDTO(note, zipMediaList)
+            val noteJsonString = gson.toJson(dto)
+
             // 1. Write Note metadata as note.json
             val noteEntry = ZipEntry("note.json")
             zos.putNextEntry(noteEntry)
@@ -21,8 +39,9 @@ object BackupRestoreUtil {
             zos.closeEntry()
 
             // 2. Write associated media
-            mediaUris.forEachIndexed { index, uri ->
+            media.forEachIndexed { index, mediaEntity ->
                 try {
+                    val uri = Uri.parse(mediaEntity.uriString)
                     context.contentResolver.openInputStream(uri)?.use { inputStream ->
                         // Generate a safe filename for the media in the zip
                         val fileName = "media_$index.file"
@@ -46,11 +65,11 @@ object BackupRestoreUtil {
 
     /**
      * Imports a .vldys archive, extracting note.json and media files.
-     * Extracts media to the app's internal storage and returns the json string and list of internal media paths.
+     * Extracts media to the app's internal storage and returns the NoteEntity and updated MediaEntity list.
      */
-    fun importFromVldys(context: Context, inputStream: InputStream): Pair<String, List<String>> {
+    fun importFromVldys(context: Context, inputStream: InputStream): Pair<NoteEntity, List<MediaEntity>> {
         var noteJsonString = ""
-        val internalMediaPaths = mutableListOf<String>()
+        val internalMediaPaths = mutableMapOf<String, String>()
         val mediaDir = File(context.filesDir, "imported_media").apply { mkdirs() }
 
         ZipInputStream(BufferedInputStream(inputStream)).use { zis ->
@@ -69,12 +88,19 @@ object BackupRestoreUtil {
                             fos.write(buffer, 0, len)
                         }
                     }
-                    internalMediaPaths.add(outFile.absolutePath)
+                    internalMediaPaths[zipEntry.name] = outFile.absolutePath
                 }
                 zipEntry = zis.nextEntry
             }
         }
 
-        return Pair(noteJsonString, internalMediaPaths)
+        val dto = gson.fromJson(noteJsonString, NoteBackupDTO::class.java)
+
+        val updatedMedia = dto.media.map { mediaEntity ->
+            val internalPath = internalMediaPaths[mediaEntity.uriString] ?: mediaEntity.uriString
+            mediaEntity.copy(uriString = internalPath)
+        }
+
+        return Pair(dto.note, updatedMedia)
     }
 }
