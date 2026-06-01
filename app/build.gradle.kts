@@ -88,7 +88,7 @@ dependencies {
     val lifecycleRuntimeKtxVersion = "2.7.0"
     val activityComposeVersion = "1.8.2"
     val composeBomVersion = "2024.02.02" // Matches Compose Compiler 1.5.x
-    val hiltVersion = "2.51.1"
+    val hiltVersion = "2.50.0"
     val roomVersion = "2.6.1"
     val gsonVersion = "2.10.1"
 
